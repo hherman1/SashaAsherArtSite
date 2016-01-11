@@ -28,7 +28,7 @@ import Test
 
 type Serv t = EitherT ServantErr IO t
 
-type TestApi = RequestSession :<|> UserApi
+type TestApi = AuthApi :<|> UserApi
 
 exec :: IO ()
 exec = do
@@ -44,13 +44,33 @@ proxy :: Proxy TestApi
 proxy = Proxy
 
 api :: Connection -> Server (TestApi)
-api c = (requestSession c) :<|> (userApi c)
+api c = 
+    authApi c
+    :<|> userApi c
 
-requestSession :: Connection -> Maybe Plaintext -> Serv (Headers '[Header "Set-Cookie" (SessionToken,UTCTime)] ())
-requestSession c creds = (maybe (left err401) return) =<< (runMaybeT $ do
-    cred <- MaybeT . return $ creds
-    token <- MaybeT $ lift (loginSession c cred)
-    return $ addHeader token ())
+authApi :: Connection -> Server AuthApi
+authApi c = requestSession c :<|> endSession c
+    where
+        requestSession :: 
+            Connection 
+            -> Maybe Plaintext 
+            -> Serv (Headers '[Header "Set-Cookie" (SessionToken,UTCTime)] ())
+        requestSession c creds = 
+            maybe (left invalidCredentials) return
+                =<< (runMaybeT $ do
+                    cred <- MaybeT . return $ creds
+                    token <- MaybeT $ lift (loginSession c cred)
+                    return $ addHeader token ())
+
+        endSession :: 
+            Connection 
+            -> SID 
+            -> UID 
+            -> Serv (Headers '[Header "Set-Cookie" (SessionToken,UTCTime)] ())
+        endSession c sid _ = do
+            lift $ deleteSessions c [sid]
+            t <- lift $ getCurrentTime
+            return $ addHeader ((SessionToken (-1) "null"),t) ()
 
 userApi :: Connection -> Server UserApi
 userApi c = createUser 

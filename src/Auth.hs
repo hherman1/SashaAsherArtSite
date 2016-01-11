@@ -43,6 +43,10 @@ import              Sql
 import              Types
 import              Data.ByteString 
                         (ByteString)
+import              Data.ByteString.Lazy
+                        (toStrict)
+import              Data.ByteString.Builder
+                        (toLazyByteString)
 import  qualified   Data.ByteString.Base64 
         as          ENC
 import  qualified   Data.ByteString.Char8 
@@ -83,34 +87,16 @@ instance FromText SessionToken where
             return $ SessionToken s t
         _ -> Nothing
 
+
 setCookie :: SessionToken -> UTCTime -> SetCookie
 setCookie token time = 
     def { setCookieName     = "session"
         , setCookieValue    = basicSession token
+        , setCookiePath     = Just "/"
         , setCookieExpires  = Just time
         , setCookieHttpOnly = True
-        , setCookieSecure   = True
+        , setCookieSecure   = False
         }
-
-fullSessCookie :: SessionToken -> UTCTime -> BS.ByteString
-fullSessCookie token time = 
-    BS.append
-        (sessionCookie token) 
-        $ BS.append
-            (encodeUtf8 "; ") 
-            (expirationByteString time)
-
-expirationByteString :: UTCTime -> BS.ByteString
-expirationByteString = 
-    encodeUtf8 
-    . pack 
-    . formatHTTP
-
-sessionCookie :: SessionToken -> BS.ByteString
-sessionCookie = 
-    BS.append 
-        (encodeUtf8 "session=") 
-        . basicSession
 
 basicSession :: SessionToken -> BS.ByteString
 basicSession (SessionToken sid token) = 
@@ -131,22 +117,24 @@ toBase64 =
     ENC.encode 
     . encodeUtf8 
     
+    --either 
+     --   (const Nothing) 
 
 unBasic :: Text -> Maybe [Text]
 unBasic ( stripPrefix "Basic " -> Just enc) = 
-    either 
-        (const Nothing) 
+    either
+        (const Nothing)
         Just
-            . splitOn ":" 
+            $ splitOn ":" 
             . decodeUtf8 
             <$> ENC.decode 
-            (encodeUtf8 enc) 
+            (encodeUtf8 enc)
 unBasic _ = Nothing
 
 
 genToken :: IO Token
 genToken = 
-    BS.unpack 
+    BS.unpack . ENC.encode 
         <$> getEntropy entropyBytes
 
 hash :: String -> IO ByteString
@@ -187,10 +175,10 @@ cleanSessions c uid = do
     sess <- openSessions c uid
     t <- getCurrentTime
     let sids = 
-        fst 
-        <$> filter 
-            ((t>) . snd) 
-            sess
+            fst 
+            <$> filter 
+                ((t>) . snd) 
+                sess
     deleteSessions c sids
 
 newSession :: 
@@ -246,6 +234,18 @@ deleteSession c sess@(SessionToken sid _) =
         MaybeT $ validateSession c sess
         MaybeT $ deleteSessions c [sid]
 
+
+invalidCredentials :: ServantErr
+invalidCredentials = 
+    ServantErr
+        { errHTTPCode = 401
+        , errReasonPhrase = "Invalid Credentials"
+        , errBody = ""
+        , errHeaders =
+            [("WWW-Authenticate", "Basic realm=\"nmrs_m7VKmomQ2YM3:\"")
+            ,("Location","/auth/get/token/")] 
+        }
+
 data WithAuth
 
 instance HasServer sublayout => HasServer (WithAuth :> sublayout) where
@@ -287,12 +287,14 @@ instance HasServer sublayout => HasServer (WithAuth :> sublayout) where
                             (respond 
                                 . mapRR 
                                 (addHeader 
-                                    $ fullSessCookie 
-                                        newToken 
-                                        newExp)))
+                                    . toStrict
+                                    .toLazyByteString
+                                    $ builder 
+                                        (newToken 
+                                        , newExp))))
         where
             fail401 = respond 
-                $ succeedWith 
+                . succeedWith 
                 $ responseLBS status401 
                     [("WWW-Authenticate", "Basic realm=\"nmrs_m7VKmomQ2YM3:\"")
                     ,("Location","/auth/get/token/")] "" 
