@@ -18,7 +18,8 @@ module Auth
     where
 import              Data.Aeson
 import              Data.Text   
-                        (Text,append
+                        (Text
+                        ,append
                         ,pack
                         ,stripPrefix
                         ,unpack
