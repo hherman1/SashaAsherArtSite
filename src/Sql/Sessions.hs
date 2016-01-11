@@ -23,7 +23,7 @@ newSession c uid token time = do
         lift $ commit c
         return $ SessionToken sid token
     
-updateSession :: Connection -> ID -> String -> UTCTime -> IO ()
+updateSession :: Connection -> SID -> String -> UTCTime -> IO ()
 updateSession c sid token expiration = do
     run c "UPDATE sessions \
         \SET token=?,expiration_date=? \
@@ -31,7 +31,7 @@ updateSession c sid token expiration = do
         [toSql token,toSql expiration,toSql sid]
     commit c
 
-openSessions :: Connection -> UID -> IO [(ID,UTCTime)]
+openSessions :: Connection -> UID -> IO [(SID,UTCTime)]
 openSessions c uid = do
     res <- quickQuery c "SELECT id, expiration_date \
         \FROM sessions \
@@ -39,7 +39,7 @@ openSessions c uid = do
         [toSql uid]
     return $ map (\[sid,time] -> (fromSql sid,fromSql time)) res
 
-deleteSessions :: Connection -> [ID] -> IO (Maybe ())
+deleteSessions :: Connection -> [SID] -> IO (Maybe ())
 deleteSessions c sids = runMaybeT $ do
     guard . not . null $ sids
     s <- return $   "DELETE FROM sessions WHERE " 
