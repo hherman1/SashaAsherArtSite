@@ -259,9 +259,9 @@ instance HasServer sublayout => HasServer (WithAuth :> sublayout) where
             runMaybeT 
                 (do c <- lift conn
                     token <- hoistMaybe 
-                        $   getSessionCookie
-                        =<< getCookies 
-                            request
+                          $  getSessionCookie
+                        =<<  getCookies 
+                             request
 
                     (uid,expiration) <- 
                         MaybeT 
